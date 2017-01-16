@@ -1,4 +1,4 @@
 FROM amazonlinux
 
-ADD build-clang.sh .
-RUN ./build-clang.sh
+ADD build.sh .
+RUN ./build.sh
