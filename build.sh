@@ -57,7 +57,6 @@ build_and_install_llvm() {
 clean_up() {
 	echo "Cleaning up..."
 	rm -rf /tmp/cmake /tmp/llvm
-	yum remove -y gcc gcc-c++
 	yum autoremove -y
 	yum clean all
 }
