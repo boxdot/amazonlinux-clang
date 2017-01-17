@@ -33,7 +33,7 @@ build_and_install_cmake() {
 download_llvm() {
 	echo "Downloading llvm..."
 	version=release_39
-	src=/tmp/llvm
+	src=/tmp/llvm/src/llvm
 	url=https://github.com/llvm-mirror
 	mkdir -p $src
 
@@ -61,8 +61,114 @@ clean_up() {
 	yum clean all
 }
 
-install_tools
-build_and_install_cmake
+# install_tools
+# build_and_install_cmake
 download_llvm
-build_and_install_llvm
-clean_up
+# build_and_install_llvm
+# clean_up
+
+
+# stage 0: build clang with system compiler
+src=/tmp/llvm/src/llvm
+mkdir -p $src/stage_0
+( cd $src/stage_0 && \
+	cmake .. \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/tmp/llvm/stage_0 \
+		-DLLVM_TARGETS_TO_BUILD=host \
+		-DLLVM_BUILD_TOOLS=0 && \
+	make -j12 clang
+)
+( cd $src/stage_0/tools/clang && make install )
+
+# stage 1: build clang, compiler-rt, libc++, libc++abi, libunwind with clang from stage 0
+prefix=/tmp/llvm
+src=$prefix/src/llvm
+mkdir -p $src/stage_1
+( cd $src/stage_1 && \
+	CC=$prefix/stage_0/bin/clang \
+	CXX=$prefix/stage_0/bin/clang++ \
+	cmake .. \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=$prefix/stage_1 \
+		-DLLVM_TARGETS_TO_BUILD=host \
+		-DLLVM_BUILD_TOOLS=0 \
+		-DC_INCLUDE_DIRS=/usr/include && \
+	make -j12 clang compiler-rt cxx cxxabi unwind
+)
+( cd $src/stage_1/tools/clang && make install )
+( cd $src/stage_1/projects/libcxx && make install )
+( cd $src/stage_1/projects/libcxxabi && make install )
+( cd $src/stage_1/projects/compiler-rt && make install )
+( cd $src/stage_1/projects/libunwind && make install )
+
+# At this point we still have the following dependencies on gcc:
+#   clang:  	librt, libstdc++, libgcc_s
+#   libc++: 	librt, libgcc_s
+#   libc++abi: 	libgcc_s
+#   libunwind:	none
+
+# stage 2: build clang, compiler-rt, libc++, libc++abi, libunwind with clang and libs from stage 1
+prefix=/tmp/llvm
+src=$prefix/src/llvm
+include_sys=`find /usr/include | grep sys/cdefs.h | xargs dirname | xargs dirname`
+mkdir -p $src/stage_2
+( cd $src/stage_2 && \
+	CC=$prefix/stage_1/bin/clang \
+	CXX=$prefix/stage_1/bin/clang++ \
+	CFLAGS="-I${include_sys}" \
+	CXXFLAGS="-stdlib=libc++ -I${include_sys}" \
+	LDFLAGS="-lc++abi -lunwind -rtlib=compiler-rt" \
+	cmake .. \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=$prefix/stage_2 \
+		-DLLVM_TARGETS_TO_BUILD=host \
+		-DLLVM_BUILD_TOOLS=0 \
+		-DLLVM_NO_OLD_LIBSTDCXX=1 \
+		-DLIBCXXABI_USE_COMPILER_RT=YES \
+		-DLIBCXXABI_USE_LLVM_UNWINDER=YES \
+		-DCLANG_DEFAULT_CXX_STDLIB="libc++" \
+		-DC_INCLUDE_DIRS="${include_sys}:/usr/include" \
+		&& \
+	make -j12 clang compiler-rt cxx cxxabi unwind
+)
+( cd $src/stage_2/tools/clang && make install )
+( cd $src/stage_2/projects/libcxx && make install )
+( cd $src/stage_2/projects/libcxxabi && make install )
+( cd $src/stage_2/projects/compiler-rt && make install )
+( cd $src/stage_2/projects/libunwind && make install )
+
+# At this point we still have the following dependencies on gcc:
+#   clang:  	librt, libgcc_s
+#   libc++: 	librt, libgcc_s
+#   libc++abi: 	none
+#   libunwind:	none
+
+prefix=/tmp/llvm
+src=$prefix/src/llvm
+include_sys=`find /usr/include | grep sys/cdefs.h | xargs dirname | xargs dirname`
+mkdir -p $src/stage_3
+( cd $src/stage_3 && \
+	CC=$prefix/stage_2/bin/clang \
+	CXX=$prefix/stage_2/bin/clang++ \
+	CFLAGS="-I${include_sys}" \
+	CXXFLAGS="-stdlib=libc++ -I${include_sys}" \
+	LDFLAGS="-lc++abi -lunwind -rtlib=compiler-rt" \
+	cmake .. \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=$prefix/stage_3 \
+		-DLLVM_TARGETS_TO_BUILD=host \
+		-DLLVM_BUILD_TOOLS=0 \
+		-DLLVM_NO_OLD_LIBSTDCXX=1 \
+		-DLIBCXXABI_USE_COMPILER_RT=YES \
+		-DLIBCXXABI_USE_LLVM_UNWINDER=YES \
+		-DCLANG_DEFAULT_CXX_STDLIB="libc++" \
+		-DC_INCLUDE_DIRS="${include_sys}:/usr/include" \
+		&& \
+	make -j12 clang compiler-rt cxx cxxabi unwind
+)
+( cd $src/stage_3/tools/clang && make install )
+( cd $src/stage_3/projects/libcxx && make install )
+( cd $src/stage_3/projects/libcxxabi && make install )
+( cd $src/stage_3/projects/compiler-rt && make install )
+( cd $src/stage_3/projects/libunwind && make install )
